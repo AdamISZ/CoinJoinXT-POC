@@ -13,6 +13,7 @@ import json
 
 cjxtlog = get_log()
 
+STATIC_TX_FEE = 0
 
 def btc_to_satoshis(amt):
     """Return integer number of satoshis given float amount in BTC
@@ -529,8 +530,8 @@ class OCCTemplateTX(object):
                  outs_info,
                  ins,
                  pre_tx_balances,
-                 min_fee=10000,
-                 max_fee=100000):
+                 min_fee=STATIC_TX_FEE,
+                 max_fee=10 * STATIC_TX_FEE):
         self.pre_tx_balances = pre_tx_balances
         self.min_fee = min_fee
         self.max_fee = max_fee
@@ -551,8 +552,9 @@ class OCCTemplateTX(object):
         first item is the number of this tx,
         second is the outpoint index, third is the counterparty number,
         if this is -1, then this output will be NN co-owned.
-        lastly the amount *fraction* of the output assigned (from which
-        exact amounts are immediately calculated based on the input sum).
+        lastly the amount, which is a *fraction* of the total input
+        minus the unilaterally owned outputs, if it's a co-owned output,
+        else it's an exact amount in satoshis.
         """
         total_input_amount = sum([x.amount for x in self.ins])
         self.total_payable = total_input_amount - self.min_fee  #TODO
@@ -561,8 +563,29 @@ class OCCTemplateTX(object):
         if all([isinstance(x, Outpoint) for x in outs_info]):
             self.outs = outs_info
         else:
+            #two pass throughs needed: first, set exact
+            #satoshi amounts for unilaterally controlled outputs,
+            #second, iterate through the NN outputs and assign a
+            #fraction of what's left based on ratio.
+            used_total = 0
             for oi in outs_info:
-                amt = int(round(Decimal(oi[3]) * Decimal(self.total_payable)))
+                if oi[2]  == -1:
+                    continue
+                self.outs.append(Outpoint(oi[1], oi[2], oi[3], self))
+                used_total += oi[3]
+            remaining_total = self.total_payable - used_total
+            print("Calculated remtot, from totpay, usedtot: ", remaining_total, self.total_payable, used_total)
+            if any([x[2] == -1 for x in outs_info]):
+                assert remaining_total > 0 #TODO dust or a multiple
+            else:
+                assert remaining_total == 0
+            ratio_total = sum([x[3] for x in outs_info if x[2]==-1])
+            for oi in outs_info:
+                if oi[2] != -1:
+                    continue
+                amt = int(round(Decimal(
+                    oi[3]) * remaining_total/ Decimal(ratio_total)))
+                #amt = int(round(Decimal(oi[3]) * Decimal(self.total_payable)))
                 self.outs.append(Outpoint(oi[1], oi[2], amt, self))
 
     def validate_balance(self):
@@ -623,14 +646,16 @@ class OCCTemplate(object):
         self.N = template_data_set["N"]
         #This lists the output indices for each transaction which are to be
         #co-owned outputs and their relative proportions
-        #(Tx number:index, Counterparty number, amount fraction)
+        #(Tx number, index, Counterparty number, amount fraction)
         #-1 is used for counterparty number when the output is co-owned by all.
         self.out_list = template_data_set["out_list"]
-        #list of items of type Inflow: [(txnumber, input number, Inflow object)]
+        #inflows have structure: (tx number, counterparty, value in satoshis, 
+        #hash and index)
         self.inflows = template_data_set["inflows"]
         #Process:
         #loop starting at 0 for N transactions
-        #For 0 we construct a transaction with inputs all inflow objects for index 0.
+        #For 0 we construct a transaction with inputs all Outpoints from
+        #inflows for index 0.
         funding_ins = [
             Outpoint(x[4], x[1], x[2], None, x[3])
             for x in self.inflows
@@ -678,7 +703,7 @@ class OCCTemplate(object):
                     prop = Decimal(owed) / Decimal(
                         total_owed)  #both negative, so positive
                     fee = int(round(
-                        Decimal(10000) / Decimal(self.n)))  #TODO hardcoded fee
+                        Decimal(STATIC_TX_FEE) / Decimal(self.n)))
                     adjusted_X = X - fee
                     assigned_redemption = int(round(Decimal(adjusted_X) * prop))
                     if assigned_redemption > 0:
@@ -730,6 +755,9 @@ def get_our_keys(wallet, N):
 
 def get_utxos_from_wallet(wallet, amtdata):
     """Retrieve utxos of specified range, from mixdepth 0 (source of funds)
+    Returns a tuple per utxo: (hash, value, pubkey, index). Each utxo's
+    value is in the range specified by that entry in amtdata, which must
+    be a list of tuples (min, max) each in satoshis.
     """
     utxos_available = wallet.get_utxos_by_mixdepth()[0]
     cjxtlog.info("These utxos available: " + str(utxos_available))
@@ -747,6 +775,8 @@ def get_utxos_from_wallet(wallet, amtdata):
                 if not utxo_candidate:
                     utxo_candidate = (hsh, val, pub, idx)
                 else:
+                    #If the new candidate is closer to the center
+                    #of the range, replace the old one
                     if abs(val -
                            (ad[0] + ad[1]) / 2.0) < abs(utxo_candidate[1] -
                                                         (ad[0] + ad[1]) / 2.0):
@@ -822,3 +852,73 @@ def apply_keys_to_template(wallet, template, realtxs, realbackouttxs,
             if to.counterparty == cp:
                 realbackouttxs[i].apply_key(keys_c.pop(0), "outs", j, cp)
     return realtxs, realbackouttxs
+
+class DummyWallet:
+    def __init__(self, vals):
+        self.vals = vals
+
+    def get_utxos_by_mixdepth(self):
+        return {0: {"aa"*32+":0": { 'address': '1Abc', 'value': self.vals[0]},
+                    "bb"*32+":1": { 'address': '1Def', 'value': self.vals[1]},
+                    "cc"*32+":2": { 'address': '1Ghi', 'value': self.vals[2]}}}
+
+    def get_key_from_addr(self, addr):
+        privs = [str(x+1)*64+"01" for x in range(3)]
+        if addr[1] == "A":
+            return privs[0]
+        elif addr[1] == "D":
+            return privs[1]
+        else:
+            return privs[2]
+
+if __name__ == "__main__":
+    amtdata = [(0.8, 1.2), (0.2, 0.4)]
+    wallet = DummyWallet([110000000, 50000000, 30000000])
+    template_inputs, msg = get_utxos_from_wallet(wallet, amtdata)
+    if not template_inputs:
+        raise Exception(
+            "Failed to get appropriate input utxos for amounts: " +
+            str(amtdata))
+    #request ins from N-1 counterparties
+    amtdata = [(0.8, 1.2), (0.4, 0.6)]
+    walletbob = DummyWallet([100000000, 50000000, 30000000])
+    counterparty_ins, msg = get_utxos_from_wallet(walletbob, amtdata)
+    #create template
+    #the template must set which unilateral outputs for each counterparty
+    #are tweakable; we will then apply the difference between the "base"
+    #value at that output, and the total inputs, as a "tweak" at that point.
+    intended_ins = [(100000000, 30000000), (100000000, 50000000)]
+    alice_in_total = sum([btc_to_satoshis(x[1]) for x in template_inputs])
+    bob_in_total = sum([btc_to_satoshis(x[1]) for x in counterparty_ins])
+    alice_tweak = alice_in_total - sum(intended_ins[0])
+    bob_tweak = bob_in_total - sum(intended_ins[1])
+    print("Got Alice in total, bob in total: ", alice_in_total, bob_in_total)
+    print("Got Alice tweak, Bob tweak: ", alice_tweak, bob_tweak)
+    #Note on out_list structure: each element is:
+    #(tx number, output index, counterparty, amount).
+    #Rules for amount: if unilateral, exact in satoshis
+    #If co-owned, a ratio specified by integers (sum of all for one tx is total)
+    #Note on inflows structure:
+    #Each entry is (tx number, counterparty, value in satoshis, hash and index)
+    #(the last two being the outpoint ref for the input).
+    template_data_set = {
+                "n":
+                2,
+                "N":
+                5,
+                "out_list":
+                [(0, 0, -1, 1.0), (1, 0, 0, 80000000+alice_tweak), (1, 1, -1, 2), (1, 2, -1, 1),
+                 (2, 0, 1, 20000000), (2, 1, 0, 20000000), (2, 2, -1, 1),
+                 (3, 0, 1, 60000000+bob_tweak), (3, 1, -1, 1), (4, 0, 0, 30000000),
+                 (4, 1, 1, 30000000), (4, 2, 1, 40000000)],
+                "inflows":
+                [(0, 0, template_inputs[0][1], template_inputs[0][0],
+                  template_inputs[0][3]),
+                 (0, 1, counterparty_ins[0][1], counterparty_ins[0][0],
+                  counterparty_ins[0][3]),
+                 (2, 0, template_inputs[1][1], template_inputs[1][0],
+                  template_inputs[1][3]), (3, 1, counterparty_ins[1][1],
+                                                counterparty_ins[1][0],
+                                                counterparty_ins[1][3])]
+            }
+    print(OCCTemplate(template_data_set))
