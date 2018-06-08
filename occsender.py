@@ -1,29 +1,32 @@
 #! /usr/bin/env python
 from __future__ import print_function
+
+import json
+import os
+import sys
+
+import jmbitcoin as btc
+from jmclient import (SegwitWallet, get_p2pk_vbyte, get_p2sh_vbyte,
+                      estimate_tx_fee, sync_wallet, RegtestBitcoinCoreInterface,
+                      BitcoinCoreInterface)
+from configure import cjxt_single, get_log, load_coinjoinxt_config
+from occbase import (OCCTemplate, OCCTemplateTX, OCCTx, btc_to_satoshis,
+                     get_our_keys, get_utxos_from_wallet,
+                     create_realtxs_from_template, apply_keys_to_template,
+                     satoshis_to_btc, get_current_blockheight)
+from occcommands import *
+
 from twisted.internet import protocol, reactor, task
 from twisted.internet.error import (ConnectionLost, ConnectionAborted,
                                     ConnectionClosed, ConnectionDone)
 from twisted.protocols import amp
 from twisted.python.log import startLogging
-from occcommands import *
-
-import json
-import hashlib
-import os
-import sys
-import pprint
-import jmbitcoin as btc
-from jmclient import (SegwitWallet, get_p2pk_vbyte, get_p2sh_vbyte, estimate_tx_fee,
-                      sync_wallet, RegtestBitcoinCoreInterface,
-                      BitcoinCoreInterface)
-from configure import cjxt_single, get_log, load_coinjoinxt_config
-from occbase import (OCCTemplate, OCCTemplateTX, OCCTx, btc_to_satoshis,
-                     get_our_keys, get_utxos_from_wallet, create_realtxs_from_template,
-                     apply_keys_to_template, satoshis_to_btc, get_current_blockheight)
 
 cjxtlog = get_log()
 
+
 class OCCClientProtocol(amp.AMP):
+
     def __init__(self, factory, wallet):
         self.wallet = wallet
         self.factory = factory
@@ -34,12 +37,12 @@ class OCCClientProtocol(amp.AMP):
         """
         if 'accepted' not in response or not response['accepted']:
             #Unintended client shutdown cannot be tested easily in twisted
-            reactor.stop() #pragma: no cover
+            reactor.stop()  #pragma: no cover
 
     def defaultErrback(self, failure):
         #see testing note above
         failure.trap(ConnectionAborted, ConnectionClosed, ConnectionDone,
-                     ConnectionLost) #pragma: no cover
+                     ConnectionLost)  #pragma: no cover
 
     def defaultCallbacks(self, d):
         d.addCallback(self.checkClientResponse)
@@ -56,31 +59,38 @@ class OCCClientProtocol(amp.AMP):
         amtdata = [(0.8, 1.2), (0.2, 0.4)]
         self.template_inputs, msg = get_utxos_from_wallet(self.wallet, amtdata)
         if not self.template_inputs:
-            raise Exception("Failed to get appropriate input utxos for amounts: " + str(amtdata))
+            raise Exception(
+                "Failed to get appropriate input utxos for amounts: " +
+                str(amtdata))
         #request ins from N-1 counterparties
         amtdata = [(0.8, 1.2), (0.4, 0.6)]
-        d = self.callRemote(OCCSetup,
-                            amtdata=json.dumps(amtdata))
+        d = self.callRemote(OCCSetup, amtdata=json.dumps(amtdata))
         self.defaultCallbacks(d)
 
     @OCCSetupResponse.responder
     def on_OCC_SETUP_RESPONSE(self, template_ins):
         self.counterparty_ins = json.loads(template_ins)
         #create template
-        template_data_set = {"n": 2, "N": 5,
-                             "out_list": [(0, 0, -1, 1.0), (1, 0, 0, 0.4), (1, 1, -1, 0.4),
-                                          (1, 2, -1, 0.2), (2, 0, 1, 2/15.0), (2, 1, 0, 2/15.0),
-                                          (2, 2, -1, 11/15.0), (3, 0, 1, 3/8.0), (3, 1, -1, 5/8.0),
-                                          (4, 0, 0, 0.3), (4, 1, 1, 0.3), (4, 2, 1, 0.4)],
-                             "inflows": [(0, 0, self.template_inputs[0][1],
-                                          self.template_inputs[0][0], self.template_inputs[0][3]),
-                                         (0, 1, self.counterparty_ins[0][1],
-                                          self.counterparty_ins[0][0], self.counterparty_ins[0][3]),
-                                         (2, 0, self.template_inputs[1][1],
-                                          self.template_inputs[1][0], self.template_inputs[1][3]),
-                                         (3, 1, self.counterparty_ins[1][1],
-                                          self.counterparty_ins[1][0], self.counterparty_ins[1][3])]
-                             }
+        template_data_set = {
+            "n":
+            2,
+            "N":
+            5,
+            "out_list":
+            [(0, 0, -1, 1.0), (1, 0, 0, 0.4), (1, 1, -1, 0.4), (1, 2, -1, 0.2),
+             (2, 0, 1, 2 / 15.0), (2, 1, 0, 2 / 15.0), (2, 2, -1, 11 / 15.0),
+             (3, 0, 1, 3 / 8.0), (3, 1, -1, 5 / 8.0), (4, 0, 0, 0.3),
+             (4, 1, 1, 0.3), (4, 2, 1, 0.4)],
+            "inflows":
+            [(0, 0, self.template_inputs[0][1], self.template_inputs[0][0],
+              self.template_inputs[0][3]),
+             (0, 1, self.counterparty_ins[0][1], self.counterparty_ins[0][0],
+              self.counterparty_ins[0][3]),
+             (2, 0, self.template_inputs[1][1], self.template_inputs[1][0],
+              self.template_inputs[1][3]), (3, 1, self.counterparty_ins[1][1],
+                                            self.counterparty_ins[1][0],
+                                            self.counterparty_ins[1][3])]
+        }
         self.template = OCCTemplate(template_data_set)
         #pre-choose our keys for template
         #how many keys do we need?
@@ -90,10 +100,11 @@ class OCCClientProtocol(amp.AMP):
         #our keys to be added to fill out partially.
         #They respond with their keys, and they also sign everything
         #except the funding.
-        d = self.callRemote(OCCKeys,
-                            template_ins=json.dumps(self.template_inputs),
-                            our_keys=json.dumps(self.our_keys),
-                            template_data=json.dumps(template_data_set))
+        d = self.callRemote(
+            OCCKeys,
+            template_ins=json.dumps(self.template_inputs),
+            our_keys=json.dumps(self.our_keys),
+            template_data=json.dumps(template_data_set))
         self.defaultCallbacks(d)
         return {"accepted": True}
 
@@ -104,14 +115,12 @@ class OCCClientProtocol(amp.AMP):
         self.lt = get_current_blockheight() + 100
         self.realtxs, self.realbackouttxs = create_realtxs_from_template(
             self.wallet, self.template, 2, 0, self.lt)
-        apply_keys_to_template(self.wallet, self.template, self.realtxs,
-                               self.realbackouttxs,
-                               [x[2] for x in self.template_inputs],
-                               self.our_keys, 2, 0)
-        apply_keys_to_template(self.wallet, self.template, self.realtxs,
-                               self.realbackouttxs,
-                               [x[2] for x in self.counterparty_ins],
-                               counterparty_keys, 2, 1)
+        apply_keys_to_template(
+            self.wallet, self.template, self.realtxs, self.realbackouttxs,
+            [x[2] for x in self.template_inputs], self.our_keys, 2, 0)
+        apply_keys_to_template(
+            self.wallet, self.template, self.realtxs, self.realbackouttxs,
+            [x[2] for x in self.counterparty_ins], counterparty_keys, 2, 1)
         for t in self.realtxs:
             t.mktx()
         for t in self.realbackouttxs:
@@ -120,15 +129,14 @@ class OCCClientProtocol(amp.AMP):
         sigs_to_send = []
         for i, tx in enumerate(self.realtxs[1:]):
             for j in range(len(tx.ins)):
-                x = self.template.txs[i+1].ins[j]
+                x = self.template.txs[i + 1].ins[j]
                 if x.spk_type == "NN" or x.counterparty == 0:
                     sigs_to_send.append(tx.sign_at_index(j))
 
         for tx in self.realbackouttxs:
             for j in range(len(tx.ins)):
                 sigs_to_send.append(tx.sign_at_index(j))
-        d = self.callRemote(OCCSigs,
-                            our_sigs=json.dumps(sigs_to_send))
+        d = self.callRemote(OCCSigs, our_sigs=json.dumps(sigs_to_send))
         self.defaultCallbacks(d)
         return {"accepted": True}
 
@@ -139,13 +147,13 @@ class OCCClientProtocol(amp.AMP):
         #Verify all, including funding, then broadcast.
         for i, tx in enumerate(self.realtxs[1:]):
             for j in range(len(tx.ins)):
-                x = self.template.txs[i+1].ins[j]
+                x = self.template.txs[i + 1].ins[j]
                 if x.spk_type == "NN" or 1 in tx.keys["ins"][j]:
                     #pop removes the used signature for the next iteration
                     tx.include_signature(j, 1, self.counterparty_sigs.pop(0))
             if not ba == 1:
                 tx.attach_signatures()
-            
+
         for tx in self.realbackouttxs:
             for j in range(len(tx.ins)):
                 tx.include_signature(j, 1, self.counterparty_sigs.pop(0))
@@ -169,15 +177,15 @@ class OCCClientProtocol(amp.AMP):
             with open("occresults.txt", "wb") as f:
                 f.write("Here are the rest of the transactions to push:\n")
                 for i, tx in enumerate(self.realtxs[1:]):
-                    f.write("Transaction number: " + str(i)+"\n")
-                    f.write(str(tx)+"\n")
+                    f.write("Transaction number: " + str(i) + "\n")
+                    f.write(str(tx) + "\n")
                 for i, tx in enumerate(self.realbackouttxs):
-                    f.write("Backout transaction number: " + str(i)+"\n")
-                    f.write(str(tx)+"\n")
+                    f.write("Backout transaction number: " + str(i) + "\n")
+                    f.write(str(tx) + "\n")
         if ba == 1:
             #we'll push all the others, one by one
-            for i in range(len(self.realtxs)-1):
-                reactor.callLater(float(i/10.0), self.realtxs[i+1].push)
+            for i in range(len(self.realtxs) - 1):
+                reactor.callLater(float(i / 10.0), self.realtxs[i + 1].push)
             reactor.callLater(5.0, self.final_checks)
         return {"accepted": True}
 
@@ -196,16 +204,18 @@ class OCCClientProtocol(amp.AMP):
                     expected_amount = tout.amount
                     print("We expected this amount out: ", expected_amount)
                     actual_key = self.realtxs[i].keys["outs"][j][0]
-                    actual_address = btc.pubkey_to_p2sh_p2wpkh_address(actual_key, get_p2sh_vbyte())
+                    actual_address = btc.pubkey_to_p2sh_p2wpkh_address(
+                        actual_key, get_p2sh_vbyte())
                     #direct query on blockchain for the transaction,
                     #then check if it pays to our address and in what amount
-                    res = cjxt_single().bc_interface.rpc('gettxout', [txid, j, True])
-                    if not ("scriptPubKey" in res and "addresses" in res["scriptPubKey"]):
+                    res = cjxt_single().bc_interface.rpc(
+                        'gettxout', [txid, j, True])
+                    if not ("scriptPubKey" in res and
+                            "addresses" in res["scriptPubKey"]):
                         print("Failed to query the tx: ", txid)
                     found_address = str(res["scriptPubKey"]["addresses"][0])
                     if not found_address == actual_address:
-                        print("Error, transaction, vout: ",
-                              txid, j,
+                        print("Error, transaction, vout: ", txid, j,
                               "has address: ", found_address,
                               ", but should have been address: ",
                               actual_address)
@@ -218,8 +228,10 @@ class OCCClientProtocol(amp.AMP):
         if match:
             print("Success! Received back total coins: ", total_coins)
         else:
-            print("Failure! Not all expected coins received, see above summary.")
+            print(
+                "Failure! Not all expected coins received, see above summary.")
         reactor.stop()
+
 
 class OCCClientProtocolFactory(protocol.ClientFactory):
     protocol = OCCClientProtocol
@@ -230,12 +242,14 @@ class OCCClientProtocolFactory(protocol.ClientFactory):
     def buildProtocol(self, addr):
         return self.protocol(self, self.wallet)
 
+
 def start_reactor(host, port, factory, ish=True):
     startLogging(sys.stdout)
     reactor.connectTCP(host, int(port), factory)
     reactor.run(installSignalHandlers=ish)
     if isinstance(cjxt_single().bc_interface, RegtestBitcoinCoreInterface):
         cjxt_single().bc_interface.shutdown_signal = True
+
 
 if __name__ == "__main__":
     load_coinjoinxt_config()
@@ -244,14 +258,14 @@ if __name__ == "__main__":
     max_mix_depth = 3
     wallet_dir = os.path.join(cjxt_single().homedir, 'wallets')
     if not os.path.exists(os.path.join(wallet_dir, wallet_name)):
-        wallet = SegwitWallet(wallet_name, None, max_mix_depth, 6,
-                              wallet_dir=wallet_dir)
+        wallet = SegwitWallet(
+            wallet_name, None, max_mix_depth, 6, wallet_dir=wallet_dir)
     else:
         while True:
             try:
                 pwd = get_password("Enter wallet decryption passphrase: ")
-                wallet = SegwitWallet(wallet_name, pwd, max_mix_depth, 6,
-                                      wallet_dir=wallet_dir)
+                wallet = SegwitWallet(
+                    wallet_name, pwd, max_mix_depth, 6, wallet_dir=wallet_dir)
             except WalletError:
                 print("Wrong password, try again.")
                 continue
@@ -260,15 +274,15 @@ if __name__ == "__main__":
                 sys.exit(0)
             break
 
-    #funding the wallet with outputs specifically suitable for the starting point.
-    funding_utxo_addr = wallet.get_new_addr(0, 0, True)
-    alice_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
     #TODO even with a fixed template, the template must be parametrized
     #by the input and promise values, this can be read in from arguments
     #and then applied to these grabs (which are only for POC anyway);
     #next step would be to have the parametrization based on wallet
     #contents (still needs ranges though).
     if isinstance(cjxt_single().bc_interface, RegtestBitcoinCoreInterface):
+        #funding the wallet with outputs specifically suitable for the starting point.
+        funding_utxo_addr = wallet.get_new_addr(0, 0, True)
+        alice_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
         cjxt_single().bc_interface.grab_coins(funding_utxo_addr, 1.0)
         cjxt_single().bc_interface.grab_coins(alice_promise_utxo_addr, 0.3)
     sync_wallet(wallet, fast=False)

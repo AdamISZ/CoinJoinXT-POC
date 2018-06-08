@@ -22,6 +22,8 @@ log.setLevel(logging.DEBUG)
 debug_silence = [False]
 import jmbase.support
 jmbase.support.debug_silence = [True]
+
+
 #consoleHandler = logging.StreamHandler(stream=sys.stdout)
 class CJXTStreamHandler(logging.StreamHandler):
 
@@ -37,6 +39,7 @@ consoleHandler = CJXTStreamHandler(stream=sys.stdout)
 consoleHandler.setFormatter(logFormatter)
 
 log.debug('CoinJoinXT logging started.')
+
 
 class AttributeDict(object):
     """
@@ -91,8 +94,10 @@ global_singleton.config_location = 'coinjoinxt.cfg'
 #confirmation for one block could conceivably take this long
 global_singleton.one_confirm_timeout = 7200
 
+
 def cjxt_single():
     return global_singleton
+
 
 def get_log():
     return log
@@ -171,23 +176,26 @@ ssl_private_key_location = 0
 ssl_certificate_location = 0
 """
 
+
 def lookup_appdata_folder():
     from os import path, environ
     if sys.platform == 'darwin':
         if "HOME" in environ:
             data_folder = path.join(os.environ["HOME"],
-                                   "Library/Application support/",
-                                   global_singleton.APPNAME) + '/'
+                                    "Library/Application support/",
+                                    global_singleton.APPNAME) + '/'
         else:
             print("Could not find home folder")
             os.exit()
 
     elif 'win32' in sys.platform or 'win64' in sys.platform:
-        data_folder = path.join(environ['APPDATA'], global_singleton.APPNAME) + '\\'
+        data_folder = path.join(environ['APPDATA'],
+                                global_singleton.APPNAME) + '\\'
     else:
-        data_folder = path.expanduser(path.join("~",
-                                    "." + global_singleton.APPNAME + "/"))
+        data_folder = path.expanduser(
+            path.join("~", "." + global_singleton.APPNAME + "/"))
     return data_folder
+
 
 def load_coinjoinxt_config(config_path=None, bs=None):
     global_singleton.config.readfp(io.BytesIO(defaultconfig))
@@ -204,8 +212,8 @@ def load_coinjoinxt_config(config_path=None, bs=None):
         os.makedirs(os.path.join(global_singleton.homedir, "logs"))
     global_singleton.config_location = os.path.join(
         global_singleton.homedir, global_singleton.config_location)
-    loadedFiles = global_singleton.config.read([global_singleton.config_location
-                                               ])
+    loadedFiles = global_singleton.config.read(
+        [global_singleton.config_location])
     if len(loadedFiles) != 1:
         with open(global_singleton.config_location, "w") as configfile:
             configfile.write(defaultconfig)
@@ -223,7 +231,7 @@ def load_coinjoinxt_config(config_path=None, bs=None):
     log.addHandler(consoleHandler)
     #inject the configuration to the underlying jmclient code.
     set_config(global_singleton.config, bcint=global_singleton.bc_interface)
-    
+
 
 def get_blockchain_interface_instance(_config):
     source = _config.get("BLOCKCHAIN", "blockchain_source")
@@ -234,7 +242,7 @@ def get_blockchain_interface_instance(_config):
     rpc_user = _config.get("BLOCKCHAIN", "rpc_user")
     rpc_password = _config.get("BLOCKCHAIN", "rpc_password")
     rpc = JsonRpc(rpc_host, rpc_port, rpc_user, rpc_password)
-    if source == 'bitcoin-rpc': #pragma: no cover
+    if source == 'bitcoin-rpc':  #pragma: no cover
         #This cannot be tested without mainnet or testnet blockchain (not regtest)
         bc_interface = BitcoinCoreInterface(rpc, network)
     elif source == 'regtest':

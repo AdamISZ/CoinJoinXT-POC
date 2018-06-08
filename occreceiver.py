@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 from __future__ import print_function
+
+import os
+import sys
+import json
+
 import jmbitcoin as btc
 from jmclient import (SegwitWallet, WalletError, estimate_tx_fee,
                       validate_address, sync_wallet,
@@ -7,8 +12,10 @@ from jmclient import (SegwitWallet, WalletError, estimate_tx_fee,
 from jmbase.support import get_password
 from configure import cjxt_single, get_log, load_coinjoinxt_config
 from occbase import (OCCTemplate, OCCTemplateTX, OCCTx, btc_to_satoshis,
-                     get_our_keys, get_utxos_from_wallet, create_realtxs_from_template,
-                     apply_keys_to_template, satoshis_to_btc, get_current_blockheight)
+                     get_our_keys, get_utxos_from_wallet,
+                     create_realtxs_from_template, apply_keys_to_template,
+                     satoshis_to_btc, get_current_blockheight)
+from occcommands import *
 
 from twisted.protocols import amp
 from twisted.internet import reactor
@@ -16,13 +23,6 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet.error import (ConnectionLost, ConnectionAborted,
                                     ConnectionClosed, ConnectionDone)
 from twisted.python import log
-
-from occcommands import *
-
-import time
-import os
-import sys
-import json
 
 cjxtlog = get_log()
 
@@ -38,13 +38,13 @@ class OCCServerProtocol(amp.AMP):
         is considered criticial.
         """
         if 'accepted' not in response or not response['accepted']:
-            reactor.stop() #pragma: no cover
+            reactor.stop()  #pragma: no cover
 
     def defaultErrback(self, failure):
         """TODO better network error handling.
         """
-        failure.trap(ConnectionAborted, ConnectionClosed,
-                     ConnectionDone, ConnectionLost)
+        failure.trap(ConnectionAborted, ConnectionClosed, ConnectionDone,
+                     ConnectionLost)
 
     def defaultCallbacks(self, d):
         d.addCallback(self.checkClientResponse)
@@ -56,8 +56,8 @@ class OCCServerProtocol(amp.AMP):
         self.our_ins, msg = get_utxos_from_wallet(self.wallet, amtdata)
         if not self.our_ins:
             raise Exception("Failed to get utxos, reason: " + str(msg))
-        d = self.callRemote(OCCSetupResponse,
-                            template_ins=json.dumps(self.our_ins))
+        d = self.callRemote(
+            OCCSetupResponse, template_ins=json.dumps(self.our_ins))
         self.defaultCallbacks(d)
         return {'accepted': True}
 
@@ -70,14 +70,14 @@ class OCCServerProtocol(amp.AMP):
         nkeys_us = self.template.keys_needed(1)
         our_keys, our_addresses = get_our_keys(self.wallet, nkeys_us)
         self.lt = get_current_blockheight() + 100
-        self.realtxs, self.realbackouttxs = create_realtxs_from_template(self.wallet,
-                                                               self.template, 2, 1, self.lt)
+        self.realtxs, self.realbackouttxs = create_realtxs_from_template(
+            self.wallet, self.template, 2, 1, self.lt)
+        apply_keys_to_template(
+            self.wallet, self.template, self.realtxs, self.realbackouttxs,
+            [x[2] for x in counterparty_ins], counterparty_keys, 2, 0)
         apply_keys_to_template(self.wallet, self.template, self.realtxs,
-                               self.realbackouttxs, [x[2] for x in counterparty_ins],
-                               counterparty_keys, 2, 0)
-        apply_keys_to_template(self.wallet, self.template, self.realtxs,
-                               self.realbackouttxs, [x[2] for x in self.our_ins],
-                               our_keys, 2, 1)
+                               self.realbackouttxs,
+                               [x[2] for x in self.our_ins], our_keys, 2, 1)
         for t in self.realtxs:
             t.mktx()
         for t in self.realbackouttxs:
@@ -86,15 +86,16 @@ class OCCServerProtocol(amp.AMP):
         sigs_to_send = []
         for i, tx in enumerate(self.realtxs[1:]):
             for j in range(len(tx.ins)):
-                x = self.template.txs[i+1].ins[j]
+                x = self.template.txs[i + 1].ins[j]
                 if x.spk_type == "NN" or x.counterparty == 1:
                     sigs_to_send.append(tx.sign_at_index(j))
         for tx in self.realbackouttxs:
             for j in range(len(tx.ins)):
                 sigs_to_send.append(tx.sign_at_index(j))
-        d = self.callRemote(OCCKeysResponse,
-                            our_keys=json.dumps(our_keys),
-                            our_sigs=json.dumps(sigs_to_send))
+        d = self.callRemote(
+            OCCKeysResponse,
+            our_keys=json.dumps(our_keys),
+            our_sigs=json.dumps(sigs_to_send))
         self.defaultCallbacks(d)
         return {'accepted': True}
 
@@ -105,7 +106,7 @@ class OCCServerProtocol(amp.AMP):
         #then send them the funding sig.
         for i, tx in enumerate(self.realtxs[1:]):
             for j in range(len(tx.ins)):
-                x = self.template.txs[i+1].ins[j]
+                x = self.template.txs[i + 1].ins[j]
                 if x.spk_type == "NN" or 0 in tx.keys["ins"][j]:
                     #pop removes the used signature for the next iteration
                     tx.include_signature(j, 0, counterparty_sigs.pop(0))
@@ -120,22 +121,25 @@ class OCCServerProtocol(amp.AMP):
             if 1 in self.realtxs[0].keys["ins"][i]:
                 sigs_to_send.append(self.realtxs[0].sign_at_index(i))
 
-        d = self.callRemote(OCCSigsResponse,
-                            funding_sigs=json.dumps(sigs_to_send))
+        d = self.callRemote(
+            OCCSigsResponse, funding_sigs=json.dumps(sigs_to_send))
         self.defaultCallbacks(d)
         return {'accepted': True}
 
 
 class OCCServerProtocolFactory(ServerFactory):
     protocol = OCCServerProtocol
+
     def __init__(self, wallet):
         self.wallet = wallet
 
     def buildProtocol(self, addr):
         return self.protocol(self, self.wallet)
 
+
 def start_daemon(host, port, factory):
     reactor.listenTCP(int(port), factory, interface=host)
+
 
 def main(finalizer=None, finalizer_args=None):
     #Will only be used by client
@@ -152,14 +156,14 @@ def main(finalizer=None, finalizer_args=None):
     max_mix_depth = 3
     wallet_dir = os.path.join(cjxt_single().homedir, 'wallets')
     if not os.path.exists(os.path.join(wallet_dir, wallet_name)):
-        wallet = SegwitWallet(wallet_name, None, max_mix_depth, 6,
-                              wallet_dir=wallet_dir)
+        wallet = SegwitWallet(
+            wallet_name, None, max_mix_depth, 6, wallet_dir=wallet_dir)
     else:
         while True:
             try:
                 pwd = get_password("Enter wallet decryption passphrase: ")
-                wallet = SegwitWallet(wallet_name, pwd, max_mix_depth, 6,
-                                      wallet_dir=wallet_dir)
+                wallet = SegwitWallet(
+                    wallet_name, pwd, max_mix_depth, 6, wallet_dir=wallet_dir)
             except WalletError:
                 print("Wrong password, try again.")
                 continue
@@ -167,20 +171,22 @@ def main(finalizer=None, finalizer_args=None):
                 print("Failed to load wallet, error message: " + repr(e))
                 sys.exit(0)
             break
-    #funding the wallet with outputs specifically suitable for the starting point.
-    funding_utxo_addr = wallet.get_new_addr(0, 0, True)
-    bob_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
+
     if isinstance(cjxt_single().bc_interface, RegtestBitcoinCoreInterface):
+        #funding the wallet with outputs specifically suitable for the starting point.
+        funding_utxo_addr = wallet.get_new_addr(0, 0, True)
+        bob_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
         cjxt_single().bc_interface.grab_coins(funding_utxo_addr, 1.0)
         cjxt_single().bc_interface.grab_coins(bob_promise_utxo_addr, 0.5)
     sync_wallet(wallet, fast=False)
     wallet.used_coins = None
     factory = OCCServerProtocolFactory(wallet)
-    start_daemon(server , port, factory)
+    start_daemon(server, port, factory)
     if finalizer:
         reactor.addSystemEventTrigger("after", "shutdown", finalizer,
                                       finalizer_args)
     reactor.run()
+
 
 if __name__ == "__main__":
     main()
