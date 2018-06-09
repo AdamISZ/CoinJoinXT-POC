@@ -13,7 +13,8 @@ from configure import cjxt_single, get_log, load_coinjoinxt_config
 from occbase import (OCCTemplate, OCCTemplateTX, OCCTx, btc_to_satoshis,
                      get_our_keys, get_utxos_from_wallet,
                      create_realtxs_from_template, apply_keys_to_template,
-                     satoshis_to_btc, get_current_blockheight)
+                     satoshis_to_btc, get_current_blockheight,
+                     get_template_dataset)
 from occcommands import *
 
 from twisted.internet import protocol, reactor, task
@@ -71,26 +72,9 @@ class OCCClientProtocol(amp.AMP):
     def on_OCC_SETUP_RESPONSE(self, template_ins):
         self.counterparty_ins = json.loads(template_ins)
         #create template
-        template_data_set = {
-            "n":
-            2,
-            "N":
-            5,
-            "out_list":
-            [(0, 0, -1, 1.0), (1, 0, 0, 0.4), (1, 1, -1, 0.4), (1, 2, -1, 0.2),
-             (2, 0, 1, 2 / 15.0), (2, 1, 0, 2 / 15.0), (2, 2, -1, 11 / 15.0),
-             (3, 0, 1, 3 / 8.0), (3, 1, -1, 5 / 8.0), (4, 0, 0, 0.3),
-             (4, 1, 1, 0.3), (4, 2, 1, 0.4)],
-            "inflows":
-            [(0, 0, self.template_inputs[0][1], self.template_inputs[0][0],
-              self.template_inputs[0][3]),
-             (0, 1, self.counterparty_ins[0][1], self.counterparty_ins[0][0],
-              self.counterparty_ins[0][3]),
-             (2, 0, self.template_inputs[1][1], self.template_inputs[1][0],
-              self.template_inputs[1][3]), (3, 1, self.counterparty_ins[1][1],
-                                            self.counterparty_ins[1][0],
-                                            self.counterparty_ins[1][3])]
-        }
+        template_data_set = get_template_dataset(
+            [(100000000, 30000000), (100000000, 50000000)],
+            self.template_inputs, self.counterparty_ins)
         self.template = OCCTemplate(template_data_set)
         #pre-choose our keys for template
         #how many keys do we need?
@@ -274,17 +258,14 @@ if __name__ == "__main__":
                 sys.exit(0)
             break
 
-    #TODO even with a fixed template, the template must be parametrized
-    #by the input and promise values, this can be read in from arguments
-    #and then applied to these grabs (which are only for POC anyway);
-    #next step would be to have the parametrization based on wallet
-    #contents (still needs ranges though).
+    """Uncomment this for auto-funding on regtest.
     if isinstance(cjxt_single().bc_interface, RegtestBitcoinCoreInterface):
         #funding the wallet with outputs specifically suitable for the starting point.
         funding_utxo_addr = wallet.get_new_addr(0, 0, True)
         alice_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
         cjxt_single().bc_interface.grab_coins(funding_utxo_addr, 1.0)
         cjxt_single().bc_interface.grab_coins(alice_promise_utxo_addr, 0.3)
+    """
     sync_wallet(wallet, fast=False)
     factory = OCCClientProtocolFactory(wallet)
     start_reactor(serv, port, factory)

@@ -890,23 +890,7 @@ class DummyWallet:
         else:
             return privs[2]
 
-if __name__ == "__main__":
-    amtdata = [(0.8, 1.2), (0.2, 0.4)]
-    wallet = DummyWallet([110000000, 50000000, 30000000])
-    template_inputs, msg = get_utxos_from_wallet(wallet, amtdata)
-    if not template_inputs:
-        raise Exception(
-            "Failed to get appropriate input utxos for amounts: " +
-            str(amtdata))
-    #request ins from N-1 counterparties
-    amtdata = [(0.8, 1.2), (0.4, 0.6)]
-    walletbob = DummyWallet([100000000, 50000000, 30000000])
-    counterparty_ins, msg = get_utxos_from_wallet(walletbob, amtdata)
-    #create template
-    #the template must set which unilateral outputs for each counterparty
-    #are tweakable; we will then apply the difference between the "base"
-    #value at that output, and the total inputs, as a "tweak" at that point.
-    intended_ins = [(100000000, 30000000), (100000000, 50000000)]
+def get_template_dataset(intended_ins, template_inputs, counterparty_ins):
     alice_in_total = sum([btc_to_satoshis(x[1]) for x in template_inputs])
     bob_in_total = sum([btc_to_satoshis(x[1]) for x in counterparty_ins])
     alice_tweak = alice_in_total - sum(intended_ins[0])
@@ -920,7 +904,7 @@ if __name__ == "__main__":
     #Note on inflows structure:
     #Each entry is (tx number, counterparty, value in satoshis, hash and index)
     #(the last two being the outpoint ref for the input).
-    template_data_set = {
+    return {
                 "n":
                 2,
                 "N":
@@ -939,5 +923,23 @@ if __name__ == "__main__":
                   template_inputs[1][3]), (3, 1, counterparty_ins[1][1],
                                                 counterparty_ins[1][0],
                                                 counterparty_ins[1][3])]
-            }
+                }
+if __name__ == "__main__":
+    amtdata = [(0.8, 1.2), (0.2, 0.4)]
+    wallet = DummyWallet([110000000, 50000000, 30000000])
+    template_inputs, msg = get_utxos_from_wallet(wallet, amtdata)
+    if not template_inputs:
+        raise Exception(
+            "Failed to get appropriate input utxos for amounts: " +
+            str(amtdata))
+    #request ins from N-1 counterparties
+    amtdata = [(0.8, 1.2), (0.4, 0.6)]
+    walletbob = DummyWallet([100000000, 50000000, 30000000])
+    counterparty_ins, msg = get_utxos_from_wallet(walletbob, amtdata)
+    #create template
+    #the template must set which unilateral outputs for each counterparty
+    #are tweakable; we will then apply the difference between the "base"
+    #value at that output, and the total inputs, as a "tweak" at that point.
+    intended_ins = [(100000000, 30000000), (100000000, 50000000)]
+    template_data_set = get_template_dataset(intended_ins, template_inputs, counterparty_ins)
     print(OCCTemplate(template_data_set))

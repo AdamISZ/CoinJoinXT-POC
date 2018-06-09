@@ -172,12 +172,15 @@ def main(finalizer=None, finalizer_args=None):
                 sys.exit(0)
             break
 
+    """
+    Uncomment this for auto-funding on regtest
     if isinstance(cjxt_single().bc_interface, RegtestBitcoinCoreInterface):
         #funding the wallet with outputs specifically suitable for the starting point.
         funding_utxo_addr = wallet.get_new_addr(0, 0, True)
         bob_promise_utxo_addr = wallet.get_new_addr(0, 0, True)
         cjxt_single().bc_interface.grab_coins(funding_utxo_addr, 1.0)
         cjxt_single().bc_interface.grab_coins(bob_promise_utxo_addr, 0.5)
+    """
     sync_wallet(wallet, fast=False)
     wallet.used_coins = None
     factory = OCCServerProtocolFactory(wallet)
