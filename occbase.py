@@ -13,7 +13,7 @@ import json
 
 cjxtlog = get_log()
 
-STATIC_TX_FEE = 0
+STATIC_TX_FEE = 10000
 
 def btc_to_satoshis(amt):
     """Return integer number of satoshis given float amount in BTC
@@ -563,7 +563,27 @@ class OCCTemplateTX(object):
         if all([isinstance(x, Outpoint) for x in outs_info]):
             self.outs = outs_info
         else:
-            #two pass throughs needed: first, set exact
+            #Cases without *any* co-owned output remove a degree
+            #of freedom; for that case (which perforce will be the
+            #last tx in the chain), we must use relative output
+            #sizes.
+            if not any([x[2] == -1 for x in outs_info]):
+                ratio_total = sum([x[3] for x in outs_info])
+                amts = []
+                for a in [x[3] for x in outs_info]:
+                    amts.append(int(round(Decimal(
+                        a) * Decimal(self.total_payable)/Decimal(ratio_total))))
+                amt_tweak = self.total_payable - sum(amts)
+                for i, oi in enumerate(outs_info):
+                    if i ==0:
+                        amtprime = amts[i] + amt_tweak
+                    else:
+                        amtprime = amts[i]
+                    self.outs.append(Outpoint(oi[1], oi[2], amtprime, self))
+                return
+            #This is the usual case: there is at least one output
+            #which is co-owned, and the fees will be taken there.
+            #Two pass throughs needed: first, set exact
             #satoshi amounts for unilaterally controlled outputs,
             #second, iterate through the NN outputs and assign a
             #fraction of what's left based on ratio.
@@ -574,7 +594,6 @@ class OCCTemplateTX(object):
                 self.outs.append(Outpoint(oi[1], oi[2], oi[3], self))
                 used_total += oi[3]
             remaining_total = self.total_payable - used_total
-            print("Calculated remtot, from totpay, usedtot: ", remaining_total, self.total_payable, used_total)
             if any([x[2] == -1 for x in outs_info]):
                 assert remaining_total > 0 #TODO dust or a multiple
             else:
@@ -892,12 +911,12 @@ if __name__ == "__main__":
     bob_in_total = sum([btc_to_satoshis(x[1]) for x in counterparty_ins])
     alice_tweak = alice_in_total - sum(intended_ins[0])
     bob_tweak = bob_in_total - sum(intended_ins[1])
-    print("Got Alice in total, bob in total: ", alice_in_total, bob_in_total)
-    print("Got Alice tweak, Bob tweak: ", alice_tweak, bob_tweak)
     #Note on out_list structure: each element is:
     #(tx number, output index, counterparty, amount).
     #Rules for amount: if unilateral, exact in satoshis
     #If co-owned, a ratio specified by integers (sum of all for one tx is total)
+    #Exception rule: for last transaction, all outputs are to unilateral
+    #control by definition. Here, amount is a ratio as above.
     #Note on inflows structure:
     #Each entry is (tx number, counterparty, value in satoshis, hash and index)
     #(the last two being the outpoint ref for the input).
@@ -909,8 +928,8 @@ if __name__ == "__main__":
                 "out_list":
                 [(0, 0, -1, 1.0), (1, 0, 0, 80000000+alice_tweak), (1, 1, -1, 2), (1, 2, -1, 1),
                  (2, 0, 1, 20000000), (2, 1, 0, 20000000), (2, 2, -1, 1),
-                 (3, 0, 1, 60000000+bob_tweak), (3, 1, -1, 1), (4, 0, 0, 30000000),
-                 (4, 1, 1, 30000000), (4, 2, 1, 40000000)],
+                 (3, 0, 1, 60000000+bob_tweak), (3, 1, -1, 1), (4, 0, 0, 3),
+                 (4, 1, 1, 3), (4, 2, 1, 4)],
                 "inflows":
                 [(0, 0, template_inputs[0][1], template_inputs[0][0],
                   template_inputs[0][3]),
