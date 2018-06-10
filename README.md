@@ -1,4 +1,7 @@
 # CoinJoinXT 
+
+See https://gist.github.com/AdamISZ/a5b3fcdd8de4575dbb8e5fba8a9bd88c for the base idea.
+
 In a nutshell: do cooperative contracts over multiple transactions, including CoinJoins but boosting deniability cf a single CoinJoin, with no extra
 interactivity (time-wise) overhead. See BIP141 for the main point about the ability to sign in advance. More docs here later.
 
