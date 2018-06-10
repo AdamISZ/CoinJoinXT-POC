@@ -772,13 +772,13 @@ def get_our_keys(wallet, N):
     return our_pubkeys, our_addresses
 
 
-def get_utxos_from_wallet(wallet, amtdata):
+def get_utxos_from_wallet(wallet, amtdata, source_mixdepth=0):
     """Retrieve utxos of specified range, from mixdepth 0 (source of funds)
     Returns a tuple per utxo: (hash, value, pubkey, index). Each utxo's
     value is in the range specified by that entry in amtdata, which must
     be a list of tuples (min, max) each in satoshis.
     """
-    utxos_available = wallet.get_utxos_by_mixdepth()[0]
+    utxos_available = wallet.get_utxos_by_mixdepth()[source_mixdepth]
     cjxtlog.info("These utxos available: " + str(utxos_available))
 
     utxos_used = []

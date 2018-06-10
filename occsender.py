@@ -8,7 +8,8 @@ import sys
 import jmbitcoin as btc
 from jmclient import (SegwitWallet, get_p2pk_vbyte, get_p2sh_vbyte,
                       estimate_tx_fee, sync_wallet, RegtestBitcoinCoreInterface,
-                      BitcoinCoreInterface)
+                      BitcoinCoreInterface, WalletError)
+from jmbase.support import get_password
 from configure import cjxt_single, get_log, load_coinjoinxt_config
 from occbase import (OCCTemplate, OCCTemplateTX, OCCTx, btc_to_satoshis,
                      get_our_keys, get_utxos_from_wallet,
